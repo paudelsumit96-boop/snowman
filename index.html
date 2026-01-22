@@ -5,77 +5,45 @@
     <title>Winter AR Spawner</title>
     <script src="https://aframe.io/releases/1.7.1/aframe.min.js"></script>
     <script>
-      // BONUS TASK: The Spawner Component
       AFRAME.registerComponent('ar-spawner', {
         init: function () {
-          // 'select' is the WebXR event for a screen tap
           this.el.addEventListener('select', () => {
-            // 1. Get the current position of the reticle (the "objects" entity)
             const reticle = document.querySelector('#objects');
-            const spawnPos = reticle.getAttribute('position');
-            const sceneEl = this.el;
+            const pos = reticle.getAttribute('position');
+            
+            // Create a new container
+            const newEntity = document.createElement('a-entity');
+            newEntity.setAttribute('position', {x: pos.x, y: pos.y, z: pos.z});
+            newEntity.setAttribute('scale', '0.1 0.1 0.1');
 
-            // 2. Create a new container entity
-            const newModel = document.createElement('a-entity');
-            newModel.setAttribute('position', {x: spawnPos.x, y: spawnPos.y, z: spawnPos.z});
-            newModel.setAttribute('scale', '0.2 0.2 0.2');
-
-            // 3. Randomly decide to build a snowman or a tree
-            if (Math.random() > 0.5) {
-                // Simple Snowman (3 spheres)
-                newModel.innerHTML = `
-                    <a-sphere position="0 0.5 0" radius="0.5" color="white"></a-sphere>
-                    <a-sphere position="0 1.2 0" radius="0.35" color="white"></a-sphere>
-                    <a-sphere position="0 1.7 0" radius="0.25" color="white"></a-sphere>
-                    <a-cone position="0 1.7 0.25" rotation="90 0 0" radius-bottom="0.05" height="0.2" color="orange"></a-cone>
-                `;
-            } else {
-                // Simple Tree (Cylinder + Cones)
-                newModel.innerHTML = `
-                    <a-cylinder position="0 0.4 0" radius="0.1" height="0.8" color="#4b3621"></a-cylinder>
-                    <a-cone position="0 1.2 0" radius-bottom="0.6" height="1" color="#2d5a27"></a-cone>
-                    <a-cone position="0 1.8 0" radius-bottom="0.4" height="0.8" color="#2d5a27"></a-cone>
-                `;
-            }
-
-            sceneEl.appendChild(newModel);
+            // Build Snowman
+            newEntity.innerHTML = `
+              <a-sphere position="0 0.5 0" radius="0.5" color="white"></a-sphere>
+              <a-sphere position="0 1.2 0" radius="0.35" color="white"></a-sphere>
+              <a-sphere position="0 1.7 0" radius="0.25" color="white"></a-sphere>
+              <a-cone position="0 1.7 0.25" rotation="90 0 0" radius-bottom="0.05" height="0.2" color="orange"></a-cone>
+            `;
+            
+            this.el.appendChild(newEntity);
           });
-        }
-      });
-
-      // Teacher's shadow component
-      AFRAME.registerComponent('follow-shadow', {
-        schema: {type: 'selector'},
-        init() {this.el.object3D.renderOrder = -1;},
-        tick() {
-          if (this.data) {
-            this.el.object3D.position.copy(this.data.object3D.position);
-            this.el.object3D.position.y -= 0.001;
-          }
         }
       });
     </script>
   </head>
-  <body>
+  <body style="margin: 0; overflow: hidden;">
     <a-scene
       ar-spawner
-      webxr="requiredFeatures: hit-test; optionalFeatures: dom-overlay; overlayElement: #overlay;"
-      reflection="directionalLight: a-light[type=directional]"
+      webxr="requiredFeatures: hit-test;"
       ar-hit-test="target: #objects;"
-      renderer="colorManagement: true; exposure: 1; toneMapping: ACESFilmic"
-      shadow="type: pcfsoft"
+      renderer="colorManagement: true;"
     >
-      <a-light type="directional" light="castShadow:true;" position="1 1 1" intensity="1.57" shadow-camera-automatic="#objects"></a-light>
-      
-      <a-camera position="0 0.4 0"></a-camera>
-
       <a-entity id="objects">
-        <a-ring rotation="-90 0 0" radius-inner="0.04" radius-outer="0.06" color="white"></a-ring>
+        <a-ring rotation="-90 0 0" radius-inner="0.02" radius-outer="0.03" color="white"></a-ring>
       </a-entity>
 
-      <a-plane follow-shadow="#objects" material="shader:shadow" shadow="cast:false;" rotation="-90 0 0" width="20" height="20"></a-plane>
-      
       <a-sky color="#87CEEB" hide-on-enter-ar></a-sky>
+      
+      <a-camera position="0 0.4 0"></a-camera>
     </a-scene>
   </body>
 </html>
