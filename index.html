@@ -1,50 +1,346 @@
 <!DOCTYPE html>
-<html>
-  <head>
-    <meta charset="utf-8">
-    <title>Winter AR Spawner</title>
-    <script src="https://aframe.io/releases/1.7.1/aframe.min.js"></script>
-    <script>
-      AFRAME.registerComponent('ar-spawner', {
-        init: function () {
-          this.el.addEventListener('select', () => {
-            const reticle = document.querySelector('#objects');
-            const pos = reticle.getAttribute('position');
-            
-            // Create a new container
-            const newEntity = document.createElement('a-entity');
-            newEntity.setAttribute('position', {x: pos.x, y: pos.y, z: pos.z});
-            newEntity.setAttribute('scale', '0.1 0.1 0.1');
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <title>Winter AR — Snowmen & Pine Trees</title>
+  <script src="https://aframe.io/releases/1.6.0/aframe.min.js"></script>
+  <style>
+    html, body { margin: 0; height: 100%; overflow: hidden; font-family: system-ui, sans-serif; }
+    #hud {
+      position: fixed; z-index: 10; top: 12px; left: 12px; right: 12px;
+      max-width: 520px; margin: 0 auto; padding: 12px 14px;
+      color: #12304a; background: rgba(255,255,255,.91); border-radius: 14px;
+      box-shadow: 0 4px 20px rgba(0,0,0,.14); backdrop-filter: blur(8px);
+    }
+    #hud h1 { font-size: 18px; margin: 0 0 4px; }
+    #hud p { font-size: 13px; margin: 4px 0; line-height: 1.35; }
+    #controls { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 10px; }
+    button, select {
+      border: 0; border-radius: 10px; padding: 10px 12px; font: inherit;
+      font-size: 13px; font-weight: 650; color: #fff; background: #176b87;
+    }
+    button.secondary { background: #36546a; }
+    select { color: #12304a; background: #e8f5fa; }
+    #status { font-size: 12px; opacity: .9; margin-top: 8px; }
+    #help { font-weight: 400; }
+    .a-enter-vr { display: none !important; }
+  </style>
+</head>
+<body>
+  <div id="hud">
+    <h1>❄️ Winter AR</h1>
+    <p id="help">Choose a winter object, then tap <b>Start AR</b>. In AR, tap a detected surface to place a new object.</p>
+    <div id="controls">
+      <select id="objectType" aria-label="Object to place">
+        <option value="snowman">⛄ Snowman</option>
+        <option value="tree">🎄 Pine tree</option>
+        <option value="both">⛄ + 🎄 Snowman & tree</option>
+      </select>
+      <button id="startAR">Start AR</button>
+      <button id="addPreview" class="secondary">Add to preview</button>
+      <button id="clear" class="secondary">Clear</button>
+    </div>
+    <div id="status">Desktop preview ready. AR requires a supported Android phone and HTTPS.</div>
+  </div>
 
-            // Build Snowman
-            newEntity.innerHTML = `
-              <a-sphere position="0 0.5 0" radius="0.5" color="white"></a-sphere>
-              <a-sphere position="0 1.2 0" radius="0.35" color="white"></a-sphere>
-              <a-sphere position="0 1.7 0" radius="0.25" color="white"></a-sphere>
-              <a-cone position="0 1.7 0.25" rotation="90 0 0" radius-bottom="0.05" height="0.2" color="orange"></a-cone>
-            `;
-            
-            this.el.appendChild(newEntity);
-          });
-        }
+  <a-scene
+    renderer="colorManagement: true; physicallyCorrectLights: true"
+    background="color: #c9eafa"
+    webxr="optionalFeatures: hit-test, local-floor; referenceSpaceType: local-floor"
+    winter-placement
+    embedded>
+    <a-assets>
+      <a-mixin id="snow" material="color: #f7fbff; roughness: 0.92"></a-mixin>
+      <a-mixin id="dark" material="color: #243747; roughness: 0.8"></a-mixin>
+    </a-assets>
+
+    <a-entity light="type: ambient; intensity: 1.15"></a-entity>
+    <a-entity light="type: directional; intensity: 1.6" position="-2 5 3"></a-entity>
+
+    <!-- Desktop scene / preview ground -->
+    <a-plane id="previewGround" position="0 0 0" rotation="-90 0 0" width="30" height="30"
+      material="color: #eaf7fc; roughness: 1"></a-plane>
+    <a-circle position="0 0.01 0" rotation="-90 0 0" radius="0.015" color="#176b87"></a-circle>
+
+    <a-entity id="previewObjects"></a-entity>
+
+    <a-entity id="cameraRig">
+      <a-camera id="camera" position="0 1.6 5" look-controls wasd-controls="enabled: true">
+        <a-cursor color="#176b87" raycaster="objects: .clickable"></a-cursor>
+      </a-camera>
+    </a-entity>
+  </a-scene>
+
+  <script>
+    // Build snowmen and pine trees from A-Frame primitives.
+    function addSnowman(parent, x, y, z, scale = 1) {
+      const root = document.createElement('a-entity');
+      root.setAttribute('position', `${x} ${y} ${z}`);
+      root.setAttribute('scale', `${scale} ${scale} ${scale}`);
+      parent.appendChild(root);
+
+      const sphere = (pos, radius, color, extra = {}) => {
+        const el = document.createElement('a-sphere');
+        el.setAttribute('position', pos);
+        el.setAttribute('radius', radius);
+        el.setAttribute('material', `color: ${color}; roughness: 0.9`);
+        Object.entries(extra).forEach(([k,v]) => el.setAttribute(k, v));
+        root.appendChild(el);
+        return el;
+      };
+      sphere('0 0.42 0', 0.42, '#f8fcff');
+      sphere('0 1.02 0', 0.30, '#ffffff');
+      sphere('0 1.49 0', 0.22, '#ffffff');
+
+      // Eyes, carrot nose, smile buttons on the front (-Z).
+      sphere('-0.075 1.55 -0.197', 0.027, '#172b3a');
+      sphere('0.075 1.55 -0.197', 0.027, '#172b3a');
+
+      const nose = document.createElement('a-cone');
+      nose.setAttribute('position', '0 1.47 -0.27');
+      nose.setAttribute('rotation', '90 0 0');
+      nose.setAttribute('radius-bottom', '0.055');
+      nose.setAttribute('radius-top', '0.008');
+      nose.setAttribute('height', '0.22');
+      nose.setAttribute('material', 'color: #f28c28; roughness: 0.8');
+      root.appendChild(nose);
+
+      for (let i = 0; i < 3; i++) sphere(`0 ${0.93 - i*0.16} -0.292`, 0.035, '#263b4b');
+
+      const hat = document.createElement('a-cylinder');
+      hat.setAttribute('position', '0 1.72 0');
+      hat.setAttribute('radius', '0.19');
+      hat.setAttribute('height', '0.08');
+      hat.setAttribute('material', 'color: #243747');
+      root.appendChild(hat);
+      const crown = document.createElement('a-cylinder');
+      crown.setAttribute('position', '0 1.84 0');
+      crown.setAttribute('radius', '0.125');
+      crown.setAttribute('height', '0.22');
+      crown.setAttribute('material', 'color: #243747');
+      root.appendChild(crown);
+
+      const scarf = document.createElement('a-torus');
+      scarf.setAttribute('position', '0 1.23 0');
+      scarf.setAttribute('rotation', '90 0 0');
+      scarf.setAttribute('radius', '0.27');
+      scarf.setAttribute('radius-tubular', '0.045');
+      scarf.setAttribute('material', 'color: #b52f45');
+      root.appendChild(scarf);
+
+      // Stick arms
+      for (const side of [-1, 1]) {
+        const arm = document.createElement('a-cylinder');
+        arm.setAttribute('position', `${side*0.48} 1.02 0`);
+        arm.setAttribute('rotation', `0 0 ${side*-58}`);
+        arm.setAttribute('radius', '0.025');
+        arm.setAttribute('height', '0.55');
+        arm.setAttribute('material', 'color: #6b4b35');
+        root.appendChild(arm);
+      }
+      return root;
+    }
+
+    function addTree(parent, x, y, z, scale = 1) {
+      const root = document.createElement('a-entity');
+      root.setAttribute('position', `${x} ${y} ${z}`);
+      root.setAttribute('scale', `${scale} ${scale} ${scale}`);
+      parent.appendChild(root);
+
+      const trunk = document.createElement('a-cylinder');
+      trunk.setAttribute('position', '0 0.25 0');
+      trunk.setAttribute('radius', '0.13');
+      trunk.setAttribute('height', '0.5');
+      trunk.setAttribute('material', 'color: #765034; roughness: 1');
+      root.appendChild(trunk);
+
+      [
+        { y: 0.72, r: 0.72, h: 1.05, c: '#176b50' },
+        { y: 1.18, r: 0.57, h: 0.9, c: '#1d805c' },
+        { y: 1.58, r: 0.40, h: 0.78, c: '#26956b' }
+      ].forEach(t => {
+        const cone = document.createElement('a-cone');
+        cone.setAttribute('position', `0 ${t.y} 0`);
+        cone.setAttribute('radius-bottom', t.r);
+        cone.setAttribute('radius-top', '0.015');
+        cone.setAttribute('height', t.h);
+        cone.setAttribute('material', `color: ${t.c}; roughness: 0.95`);
+        root.appendChild(cone);
       });
-    </script>
-  </head>
-  <body style="margin: 0; overflow: hidden;">
-    <a-scene
-      ar-spawner
-      webxr="requiredFeatures: hit-test;"
-      ar-hit-test="target: #objects;"
-      
-      
-    >
-      <a-entity id="objects">
-        <a-ring rotation="-90 0 0" radius-inner="0.02" radius-outer="0.03" color="white"></a-ring>
-      </a-entity>
 
-      <a-sky color="#87CEEB" hide-on-enter-ar></a-sky>
-      
-      <a-camera position="0 0.4 0"></a-camera>
-    </a-scene>
-  </body>
+      // Snow caps / baubles
+      for (const p of [
+        [-0.25,0.95,-0.32], [0.28,1.25,-0.2], [-0.1,1.55,-0.24], [0.18,0.68,-0.48]
+      ]) {
+        const bauble = document.createElement('a-sphere');
+        bauble.setAttribute('position', p.join(' '));
+        bauble.setAttribute('radius', '0.075');
+        bauble.setAttribute('material', 'color: #f4fbff; roughness: 0.7');
+        root.appendChild(bauble);
+      }
+      return root;
+    }
+
+    AFRAME.registerComponent('winter-placement', {
+      init: function () {
+        this.scene = this.el;
+        this.preview = document.querySelector('#previewObjects');
+        this.active = false;
+        this.hitTestSource = null;
+        this.viewerSpace = null;
+        this.localSpace = null;
+        this.reticle = null;
+        this._onSelect = this.onSelect.bind(this);
+        this._onSessionStart = this.onSessionStart.bind(this);
+        this._onSessionEnd = this.onSessionEnd.bind(this);
+
+        // Reticle shows the detected horizontal placement point in AR.
+        this.reticle = document.createElement('a-entity');
+        this.reticle.setAttribute('visible', 'false');
+        const ring = document.createElement('a-ring');
+        ring.setAttribute('rotation', '-90 0 0');
+        ring.setAttribute('radius-inner', '0.12');
+        ring.setAttribute('radius-outer', '0.16');
+        ring.setAttribute('material', 'color: #1687a7; side: double; shader: flat');
+        this.reticle.appendChild(ring);
+        this.scene.appendChild(this.reticle);
+
+        this.scene.addEventListener('enter-vr', () => {
+          if (this.scene.is('ar-mode')) this.onSessionStart();
+        });
+        this.scene.addEventListener('exit-vr', this._onSessionEnd);
+        this.scene.addEventListener('renderstart', () => {
+          const renderer = this.scene.renderer;
+          if (renderer && renderer.xr) {
+            renderer.xr.addEventListener('sessionstart', this._onSessionStart);
+            renderer.xr.addEventListener('sessionend', this._onSessionEnd);
+          }
+        });
+      },
+
+      async onSessionStart() {
+        const renderer = this.scene.renderer;
+        const session = renderer && renderer.xr && renderer.xr.getSession();
+        if (!session || !session.requestHitTestSource) {
+          setStatus('AR session started, but hit-test is unavailable in this browser/device.');
+          return;
+        }
+        try {
+          this.viewerSpace = await session.requestReferenceSpace('viewer');
+          this.localSpace = await session.requestReferenceSpace('local-floor').catch(
+            () => session.requestReferenceSpace('local')
+          );
+          this.hitTestSource = await session.requestHitTestSource({ space: this.viewerSpace });
+          session.addEventListener('select', this._onSelect);
+          this.active = true;
+          setStatus('AR ready: move your phone until the blue ring appears, then tap to place.');
+        } catch (err) {
+          setStatus('Could not start surface detection. Check Chrome/WebXR support and permissions.');
+          console.error(err);
+        }
+      },
+
+      onSessionEnd() {
+        this.active = false;
+        this.hitTestSource = null;
+        this.reticle.setAttribute('visible', 'false');
+        setStatus('AR ended. You can start again or use the desktop preview.');
+      },
+
+      onSelect() {
+        if (!this.reticle || !this.reticle.getAttribute('visible')) {
+          setStatus('No surface detected yet — slowly move the phone to scan the floor or desk.');
+          return;
+        }
+        const p = this.reticle.object3D.position;
+        this.spawnAt(p.x, p.y, p.z, true);
+      },
+
+      spawnAt(x, y, z, inAR) {
+        const kind = document.querySelector('#objectType').value;
+        const target = inAR ? this.scene : this.preview;
+        if (kind === 'snowman' || kind === 'both') addSnowman(target, x, y, z, inAR ? 0.28 : 0.65);
+        if (kind === 'tree' || kind === 'both') {
+          const offset = kind === 'both' ? 0.85 : 0;
+          addTree(target, x + offset, y, z, inAR ? 0.32 : 0.65);
+        }
+      },
+
+      tick: function () {
+        if (!this.active || !this.hitTestSource || !this.localSpace) return;
+        const frame = this.scene.frame;
+        if (!frame) return;
+        const results = frame.getHitTestResults(this.hitTestSource);
+        if (!results.length) {
+          this.reticle.setAttribute('visible', 'false');
+          return;
+        }
+        const pose = results[0].getPose(this.localSpace);
+        if (!pose) return;
+        const m = pose.transform.matrix;
+        this.reticle.object3D.position.set(m[12], m[13], m[14]);
+        // Align the reticle to the detected plane orientation.
+        this.reticle.object3D.quaternion.setFromRotationMatrix(
+          new THREE.Matrix4().fromArray(m)
+        );
+        this.reticle.setAttribute('visible', 'true');
+      }
+    });
+
+    function setStatus(message) {
+      const el = document.querySelector('#status');
+      if (el) el.textContent = message;
+    }
+
+    const scene = document.querySelector('a-scene');
+    document.querySelector('#startAR').addEventListener('click', async () => {
+      if (!navigator.xr) {
+        setStatus('WebXR is not available here. Open this GitHub Pages site in Chrome on a supported Android phone.');
+        return;
+      }
+      try {
+        const supported = await navigator.xr.isSessionSupported('immersive-ar');
+        if (!supported) {
+          setStatus('This device/browser does not support immersive AR. Use the desktop preview or try supported Android Chrome.');
+          return;
+        }
+        await scene.enterAR();
+      } catch (err) {
+        console.error(err);
+        setStatus('Could not enter AR. Check HTTPS, camera permissions, and browser compatibility.');
+      }
+    });
+
+    document.querySelector('#addPreview').addEventListener('click', () => {
+      const count = document.querySelector('#previewObjects').children.length;
+      const x = ((count % 4) - 1.5) * 1.35;
+      const z = -1.0 - Math.floor(count / 4) * 1.5;
+      scene.components['winter-placement'].spawnAt(x, 0.02, z, false);
+      setStatus('Added object to desktop preview. Use mouse/touch to look around; WASD moves the camera.');
+    });
+
+    document.querySelector('#clear').addEventListener('click', () => {
+      document.querySelector('#previewObjects').replaceChildren();
+      setStatus('Preview objects cleared. AR-placed objects disappear when you reload the page or end the session.');
+    });
+
+    // A-Frame versions differ in how enterAR is exposed. The fallback uses the scene's XR system.
+    scene.addEventListener('loaded', () => {
+      setStatus('Ready. Click “Add to preview” to test the winter objects on desktop, or “Start AR” on Android Chrome.');
+      if (!scene.enterAR) {
+        scene.enterAR = async function () {
+          const xr = this.renderer.xr;
+          const session = await navigator.xr.requestSession('immersive-ar', {
+            requiredFeatures: ['hit-test'],
+            optionalFeatures: ['local-floor', 'dom-overlay'],
+            domOverlay: { root: document.body }
+          });
+          await xr.setSession(session);
+          this.is('ar-mode');
+        };
+      }
+    });
+  </script>
+</body>
 </html>
