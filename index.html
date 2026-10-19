@@ -3,43 +3,49 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="viewport"
+        content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+
   <title>Winter AR Wonderland</title>
 
   <script src="https://aframe.io/releases/1.7.1/aframe.min.js"></script>
 
   <style>
-    * { box-sizing: border-box; }
+    * {
+      box-sizing: border-box;
+    }
 
-    body {
+    html, body {
       margin: 0;
-      font-family: Arial, sans-serif;
+      width: 100%;
+      height: 100%;
       overflow: hidden;
+      font-family: Arial, sans-serif;
       background: transparent;
     }
 
     #ui {
       position: fixed;
-      z-index: 10;
+      z-index: 1000;
       top: 12px;
       left: 12px;
       right: 12px;
       padding: 14px;
+      color: #17354b;
+      background: rgba(255, 255, 255, 0.95);
       border-radius: 16px;
-      color: #123047;
-      background: rgba(255, 255, 255, 0.94);
-      box-shadow: 0 4px 18px #0002;
+      box-shadow: 0 3px 16px #0003;
     }
 
     h1 {
-      font-size: 20px;
       margin: 0 0 6px;
+      font-size: 20px;
     }
 
     #status {
+      margin: 7px 0 12px;
       font-size: 13px;
-      margin: 6px 0 12px;
-      line-height: 1.4;
+      line-height: 1.45;
     }
 
     .buttons {
@@ -49,33 +55,40 @@
 
     button {
       flex: 1;
-      border: 0;
+      min-height: 44px;
+      padding: 10px 6px;
+      border: none;
       border-radius: 10px;
-      padding: 12px 8px;
+      background: #e1f2f7;
+      color: #17354b;
       font-size: 15px;
       font-weight: bold;
-      color: #123047;
-      background: #e4f4fa;
       touch-action: manipulation;
     }
 
     button.selected {
-      background: #147d92;
       color: white;
+      background: #137d91;
     }
 
     #hint {
-      font-size: 12px;
       margin-top: 9px;
-      color: #456;
+      font-size: 12px;
+      line-height: 1.4;
+      color: #425a68;
     }
 
-    #start {
-      display: none;
-      margin-top: 8px;
+    #resetBtn {
       width: 100%;
-      background: #176b50;
-      color: white;
+      margin-top: 8px;
+      background: #f0e8e0;
+    }
+
+    a-scene {
+      position: fixed !important;
+      inset: 0;
+      width: 100%;
+      height: 100%;
     }
   </style>
 </head>
@@ -83,282 +96,350 @@
 <body>
   <div id="ui">
     <h1>❄️ Winter AR Wonderland</h1>
-    <div id="status">Loading AR scene…</div>
 
-    <div class="buttons">
-      <button id="snowmanBtn" class="selected">☃️ Snowman</button>
-      <button id="treeBtn">🎄 Pine Tree</button>
+    <div id="status">
+      Loading AR…
     </div>
 
-    <button id="start">Start AR</button>
+    <div class="buttons">
+      <button id="snowmanBtn" class="selected">
+        ☃️ Snowman
+      </button>
+
+      <button id="treeBtn">
+        🎄 Pine Tree
+      </button>
+    </div>
+
+    <button id="resetBtn">Remove all objects</button>
 
     <div id="hint">
-      Start AR, point at a floor or table, wait for the ring, then tap to place objects.
-      Each tap places another object.
+      Enter AR, move your phone slowly over a floor or table,
+      wait for the green ring, then tap once to place an object.
+      Each tap adds another object.
     </div>
   </div>
 
   <a-scene
-    embedded
     renderer="alpha: true; antialias: true"
     webxr="optionalFeatures: hit-test"
     xr-mode-ui="XRMode: ar"
     background="transparent: true">
 
-    <a-entity id="cameraRig">
-      <a-camera id="camera" position="0 0 0"></a-camera>
-    </a-entity>
+    <a-camera id="camera" position="0 0 0"></a-camera>
 
-    <!-- Reticle: shown at detected real-world surfaces -->
+    <!-- Ring follows detected real-world surfaces -->
     <a-ring
       id="reticle"
-      radius-inner="0.09"
-      radius-outer="0.12"
+      radius-inner="0.075"
+      radius-outer="0.105"
       rotation="-90 0 0"
-      color="#00ffcc"
+      color="#00ffad"
       material="shader: flat; side: double"
       visible="false">
     </a-ring>
 
-    <!-- Placed objects are added here -->
     <a-entity id="placedObjects"></a-entity>
+
   </a-scene>
 
   <script>
-    const scene = document.querySelector("a-scene");
-    const statusEl = document.querySelector("#status");
-    const reticle = document.querySelector("#reticle");
-    const placedObjects = document.querySelector("#placedObjects");
-    const snowmanBtn = document.querySelector("#snowmanBtn");
-    const treeBtn = document.querySelector("#treeBtn");
-    const startBtn = document.querySelector("#start");
+    (() => {
+      const scene = document.querySelector("a-scene");
+      const statusEl = document.querySelector("#status");
+      const reticle = document.querySelector("#reticle");
+      const placedObjects = document.querySelector("#placedObjects");
 
-    let selectedObject = "snowman";
-    let hitTestSource = null;
-    let viewerSpace = null;
-    let localSpace = null;
-    let latestHitPose = null;
-    let arSession = null;
+      const snowmanBtn = document.querySelector("#snowmanBtn");
+      const treeBtn = document.querySelector("#treeBtn");
+      const resetBtn = document.querySelector("#resetBtn");
 
-    function setStatus(text) {
-      statusEl.textContent = text;
-    }
+      let selectedObject = "snowman";
+      let arSession = null;
+      let hitTestSource = null;
+      let localSpace = null;
+      let latestHitPose = null;
+      let sessionGeneration = 0;
 
-    scene.addEventListener("loaded", async () => {
-      if (!navigator.xr) {
-        setStatus("WebXR is unavailable. Open this page in Chrome on your AR-supported phone.");
-        return;
+      function setStatus(message) {
+        statusEl.textContent = message;
       }
 
-      try {
-        const supported =
-          await navigator.xr.isSessionSupported("immersive-ar");
+      // -----------------------------
+      // Object selection
+      // -----------------------------
 
-        if (!supported) {
-          setStatus("Immersive AR is not supported in this browser.");
+      snowmanBtn.addEventListener("click", () => {
+        selectedObject = "snowman";
+        snowmanBtn.classList.add("selected");
+        treeBtn.classList.remove("selected");
+        setStatus("Snowman selected. Find a surface and tap to place.");
+      });
+
+      treeBtn.addEventListener("click", () => {
+        selectedObject = "tree";
+        treeBtn.classList.add("selected");
+        snowmanBtn.classList.remove("selected");
+        setStatus("Pine tree selected. Find a surface and tap to place.");
+      });
+
+      resetBtn.addEventListener("click", () => {
+        while (placedObjects.firstChild) {
+          placedObjects.removeChild(placedObjects.firstChild);
+        }
+
+        setStatus("All placed objects removed.");
+      });
+
+      // -----------------------------
+      // Snowman model
+      // -----------------------------
+
+      function makeSnowman() {
+        const group = document.createElement("a-entity");
+
+        function sphere(x, y, z, radius, color) {
+          const el = document.createElement("a-sphere");
+          el.setAttribute("position", `${x} ${y} ${z}`);
+          el.setAttribute("radius", radius);
+          el.setAttribute("color", color);
+          el.setAttribute("roughness", "0.9");
+          group.appendChild(el);
+          return el;
+        }
+
+        sphere(0, 0.32, 0, 0.30, "#f7fbff");
+        sphere(0, 0.75, 0, 0.22, "#ffffff");
+        sphere(0, 1.07, 0, 0.155, "#ffffff");
+
+        // Eyes face toward the initial forward direction.
+        sphere(-0.052, 1.09, -0.135, 0.018, "#20242b");
+        sphere(0.052, 1.09, -0.135, 0.018, "#20242b");
+
+        const nose = document.createElement("a-cone");
+        nose.setAttribute("position", "0 1.055 -0.18");
+        nose.setAttribute("radius-bottom", "0.028");
+        nose.setAttribute("radius-top", "0.003");
+        nose.setAttribute("height", "0.12");
+        nose.setAttribute("rotation", "90 0 0");
+        nose.setAttribute("color", "#ff8b26");
+        group.appendChild(nose);
+
+        const hatBrim = document.createElement("a-cylinder");
+        hatBrim.setAttribute("position", "0 1.205 0");
+        hatBrim.setAttribute("radius", "0.16");
+        hatBrim.setAttribute("height", "0.025");
+        hatBrim.setAttribute("color", "#27364b");
+        group.appendChild(hatBrim);
+
+        const hatTop = document.createElement("a-cylinder");
+        hatTop.setAttribute("position", "0 1.28 0");
+        hatTop.setAttribute("radius", "0.105");
+        hatTop.setAttribute("height", "0.13");
+        hatTop.setAttribute("color", "#27364b");
+        group.appendChild(hatTop);
+
+        sphere(0, 0.69, -0.205, 0.022, "#27364b");
+        sphere(0, 0.77, -0.207, 0.022, "#27364b");
+        sphere(0, 0.85, -0.205, 0.022, "#27364b");
+
+        return group;
+      }
+
+      // -----------------------------
+      // Pine tree model
+      // -----------------------------
+
+      function makeTree() {
+        const group = document.createElement("a-entity");
+
+        const trunk = document.createElement("a-cylinder");
+        trunk.setAttribute("position", "0 0.16 0");
+        trunk.setAttribute("radius", "0.075");
+        trunk.setAttribute("height", "0.32");
+        trunk.setAttribute("color", "#79502e");
+        group.appendChild(trunk);
+
+        const tiers = [
+          { y: 0.42, radius: 0.38, height: 0.68 },
+          { y: 0.75, radius: 0.29, height: 0.62 },
+          { y: 1.04, radius: 0.20, height: 0.53 }
+        ];
+
+        for (const tier of tiers) {
+          const cone = document.createElement("a-cone");
+          cone.setAttribute("position", `0 ${tier.y} 0`);
+          cone.setAttribute("radius-bottom", tier.radius);
+          cone.setAttribute("radius-top", "0.005");
+          cone.setAttribute("height", tier.height);
+          cone.setAttribute("color", "#167349");
+          cone.setAttribute("roughness", "0.9");
+          group.appendChild(cone);
+        }
+
+        const star = document.createElement("a-sphere");
+        star.setAttribute("position", "0 1.34 0");
+        star.setAttribute("radius", "0.065");
+        star.setAttribute("color", "#ffd54f");
+        star.setAttribute("emissive", "#775000");
+        group.appendChild(star);
+
+        // Small colored ornaments
+        const decorations = [
+          [-0.15, 0.45, -0.17, "#d92d42"],
+          [0.14, 0.62, -0.18, "#f6d34b"],
+          [-0.08, 0.82, -0.20, "#e9f5ff"],
+          [0.09, 0.98, -0.13, "#d92d42"]
+        ];
+
+        for (const [x, y, z, color] of decorations) {
+          const ornament = document.createElement("a-sphere");
+          ornament.setAttribute("position", `${x} ${y} ${z}`);
+          ornament.setAttribute("radius", "0.035");
+          ornament.setAttribute("color", color);
+          group.appendChild(ornament);
+        }
+
+        return group;
+      }
+
+      // -----------------------------
+      // Place object at hit-test pose
+      // -----------------------------
+
+      function placeObject() {
+        if (!latestHitPose) {
+          setStatus(
+            "No surface detected yet. Slowly move your phone over the floor or table."
+          );
           return;
         }
 
-        setStatus("AR supported. Tap the AR button in the scene to begin.");
-      } catch (error) {
-        setStatus("AR check failed: " + error.message);
-      }
-    });
+        const transform = latestHitPose.transform;
+        const p = transform.position;
+        const q = transform.orientation;
 
-    snowmanBtn.addEventListener("click", () => {
-      selectedObject = "snowman";
-      snowmanBtn.classList.add("selected");
-      treeBtn.classList.remove("selected");
-      setStatus("Snowman selected. Tap a detected surface to place one.");
-    });
+        const object = selectedObject === "snowman"
+          ? makeSnowman()
+          : makeTree();
 
-    treeBtn.addEventListener("click", () => {
-      selectedObject = "tree";
-      treeBtn.classList.add("selected");
-      snowmanBtn.classList.remove("selected");
-      setStatus("Pine tree selected. Tap a detected surface to place one.");
-    });
+        object.object3D.position.set(p.x, p.y, p.z);
+        object.object3D.quaternion.set(q.x, q.y, q.z, q.w);
 
-    // Snowman made from simple 3D shapes.
-    function makeSnowman() {
-      const group = document.createElement("a-entity");
+        placedObjects.appendChild(object);
 
-      const bottom = document.createElement("a-sphere");
-      bottom.setAttribute("position", "0 0.42 0");
-      bottom.setAttribute("radius", "0.32");
-      bottom.setAttribute("color", "#f8fcff");
-      bottom.setAttribute("roughness", "0.92");
-      group.appendChild(bottom);
-
-      const middle = document.createElement("a-sphere");
-      middle.setAttribute("position", "0 0.88 0");
-      middle.setAttribute("radius", "0.23");
-      middle.setAttribute("color", "#ffffff");
-      middle.setAttribute("roughness", "0.9");
-      group.appendChild(middle);
-
-      const head = document.createElement("a-sphere");
-      head.setAttribute("position", "0 1.21 0");
-      head.setAttribute("radius", "0.16");
-      head.setAttribute("color", "#ffffff");
-      group.appendChild(head);
-
-      // Eyes and carrot nose face the initial forward direction.
-      for (const x of [-0.055, 0.055]) {
-        const eye = document.createElement("a-sphere");
-        eye.setAttribute("position", `${x} 1.24 -0.143`);
-        eye.setAttribute("radius", "0.018");
-        eye.setAttribute("color", "#222222");
-        group.appendChild(eye);
+        setStatus(
+          (selectedObject === "snowman" ? "☃️ Snowman" : "🎄 Pine tree") +
+          " placed! Tap again to place another."
+        );
       }
 
-      const nose = document.createElement("a-cone");
-      nose.setAttribute("position", "0 1.19 -0.19");
-      nose.setAttribute("radius-bottom", "0.035");
-      nose.setAttribute("radius-top", "0");
-      nose.setAttribute("height", "0.13");
-      nose.setAttribute("rotation", "90 0 0");
-      nose.setAttribute("color", "#ff8c24");
-      group.appendChild(nose);
+      // -----------------------------
+      // WebXR session and hit testing
+      // -----------------------------
 
-      const hat = document.createElement("a-cylinder");
-      hat.setAttribute("position", "0 1.38 0");
-      hat.setAttribute("radius", "0.12");
-      hat.setAttribute("height", "0.12");
-      hat.setAttribute("color", "#26364c");
-      group.appendChild(hat);
+      scene.addEventListener("loaded", async () => {
+        if (!navigator.xr) {
+          setStatus("WebXR unavailable. Open this page in Chrome on your AR phone.");
+          return;
+        }
 
-      const brim = document.createElement("a-cylinder");
-      brim.setAttribute("position", "0 1.32 0");
-      brim.setAttribute("radius", "0.17");
-      brim.setAttribute("height", "0.025");
-      brim.setAttribute("color", "#26364c");
-      group.appendChild(brim);
+        try {
+          const supported =
+            await navigator.xr.isSessionSupported("immersive-ar");
 
-      for (const y of [0.82, 0.92, 1.02]) {
-        const button = document.createElement("a-sphere");
-        button.setAttribute("position", `0 ${y} -0.225`);
-        button.setAttribute("radius", "0.025");
-        button.setAttribute("color", "#26364c");
-        group.appendChild(button);
-      }
-
-      return group;
-    }
-
-    // Pine tree made from stacked green cones and a trunk.
-    function makeTree() {
-      const group = document.createElement("a-entity");
-
-      const trunk = document.createElement("a-cylinder");
-      trunk.setAttribute("position", "0 0.18 0");
-      trunk.setAttribute("radius", "0.09");
-      trunk.setAttribute("height", "0.36");
-      trunk.setAttribute("color", "#79502e");
-      group.appendChild(trunk);
-
-      const tiers = [
-        { y: 0.58, r: 0.43, h: 0.72 },
-        { y: 0.94, r: 0.34, h: 0.66 },
-        { y: 1.25, r: 0.24, h: 0.58 }
-      ];
-
-      for (const tier of tiers) {
-        const cone = document.createElement("a-cone");
-        cone.setAttribute("position", `0 ${tier.y} 0`);
-        cone.setAttribute("radius-bottom", tier.r);
-        cone.setAttribute("radius-top", "0.015");
-        cone.setAttribute("height", tier.h);
-        cone.setAttribute("color", "#16734a");
-        cone.setAttribute("roughness", "0.9");
-        group.appendChild(cone);
-      }
-
-      const star = document.createElement("a-sphere");
-      star.setAttribute("position", "0 1.58 0");
-      star.setAttribute("radius", "0.075");
-      star.setAttribute("color", "#ffd34f");
-      star.setAttribute("emissive", "#8a5a00");
-      group.appendChild(star);
-
-      return group;
-    }
-
-    function placeObject(position, orientation) {
-      const object = selectedObject === "snowman"
-        ? makeSnowman()
-        : makeTree();
-
-      object.setAttribute("position", {
-        x: position.x,
-        y: position.y,
-        z: position.z
+          setStatus(
+            supported
+              ? "AR supported. Tap the AR button to begin."
+              : "This browser does not support immersive AR."
+          );
+        } catch (error) {
+          setStatus("AR support check failed: " + error.message);
+        }
       });
 
-      // Apply the surface orientation returned by hit testing.
-      object.object3D.quaternion.copy(orientation);
+      scene.addEventListener("enter-vr", async () => {
+        const generation = ++sessionGeneration;
 
-      placedObjects.appendChild(object);
-      setStatus(
-        (selectedObject === "snowman" ? "Snowman" : "Pine tree") +
-        " placed! Tap again to place another."
-      );
-    }
+        try {
+          arSession = scene.renderer.xr.getSession();
 
-    scene.addEventListener("enter-vr", async () => {
-      const renderer = scene.renderer;
-      arSession = renderer.xr.getSession();
+          if (!arSession) {
+            setStatus("AR session not found. Exit AR and try again.");
+            return;
+          }
 
-      if (!arSession) {
-        setStatus("AR session did not start. Please try again.");
-        return;
-      }
-
-      try {
-        viewerSpace = await arSession.requestReferenceSpace("viewer");
-        localSpace = await arSession.requestReferenceSpace("local");
-
-        hitTestSource = await arSession.requestHitTestSource({
-          space: viewerSpace
-        });
-
-        setStatus("Move your phone slowly to scan the floor or a table.");
-
-        arSession.addEventListener("end", () => {
           hitTestSource = null;
-          viewerSpace = null;
           localSpace = null;
           latestHitPose = null;
           reticle.setAttribute("visible", false);
-          setStatus("AR ended. Tap the AR button to start again.");
-        });
-      } catch (error) {
-        setStatus("Surface detection failed: " + error.message);
-      }
-    });
 
-    // Update the reticle using real-world hit-test results.
-    scene.renderer?.xr?.addEventListener("sessionstart", () => {
-      setStatus("AR started. Looking for surfaces…");
-    });
+          setStatus("Starting surface detection…");
 
-    scene.addEventListener("renderstart", () => {
-      const renderer = scene.renderer;
+          localSpace = await arSession.requestReferenceSpace("local");
 
-      renderer.setAnimationLoop((time, frame) => {
-        if (!frame || !hitTestSource || !localSpace) return;
+          const viewerSpace =
+            await arSession.requestReferenceSpace("viewer");
 
-        const hit = frame.getHitTestResults(hitTestSource)[0];
+          const source = await arSession.requestHitTestSource({
+            space: viewerSpace
+          });
 
-        if (!hit) {
+          if (generation !== sessionGeneration || !arSession) {
+            source.cancel();
+            return;
+          }
+
+          hitTestSource = source;
+
+          setStatus("Move your phone slowly to scan the floor or a table.");
+
+          arSession.addEventListener("end", () => {
+            if (generation !== sessionGeneration) return;
+
+            sessionGeneration++;
+            arSession = null;
+            hitTestSource = null;
+            localSpace = null;
+            latestHitPose = null;
+
+            reticle.setAttribute("visible", false);
+            setStatus("AR ended. Tap the AR button to start again.");
+          }, { once: true });
+
+        } catch (error) {
+          hitTestSource = null;
+          latestHitPose = null;
+          reticle.setAttribute("visible", false);
+
+          setStatus("Surface detection error: " + error.message);
+        }
+      });
+
+      // IMPORTANT:
+      // Use A-Frame's tick loop. Do not replace renderer.setAnimationLoop().
+      scene.addEventListener("tick", () => {
+        if (!arSession || !hitTestSource || !localSpace) return;
+
+        const frame = scene.renderer.xr.getFrame();
+
+        if (!frame) return;
+
+        const hits = frame.getHitTestResults(hitTestSource);
+
+        if (!hits.length) {
           latestHitPose = null;
           reticle.setAttribute("visible", false);
           return;
         }
 
-        const pose = hit.getPose(localSpace);
+        const pose = hits[0].getPose(localSpace);
 
-        if (!pose) return;
+        if (!pose) {
+          latestHitPose = null;
+          reticle.setAttribute("visible", false);
+          return;
+        }
 
         latestHitPose = pose;
 
@@ -369,31 +450,33 @@
         reticle.object3D.quaternion.set(q.x, q.y, q.z, q.w);
         reticle.setAttribute("visible", true);
       });
-    });
 
-    // Tapping the AR view places an object at the latest detected surface.
-    scene.addEventListener("click", () => {
-      if (!arSession || !latestHitPose) {
-        if (arSession) {
-          setStatus("No surface detected yet. Slowly move your phone to scan.");
+      // -----------------------------
+      // Taps to place objects
+      // -----------------------------
+
+      scene.addEventListener("click", event => {
+        // Ignore taps on the HTML controls.
+        if (event.target && event.target.closest &&
+            event.target.closest("#ui")) {
+          return;
         }
-        return;
-      }
 
-      const transform = latestHitPose.transform;
-      const p = transform.position;
-      const q = transform.orientation;
+        if (!arSession) {
+          setStatus("First tap the AR button to enter AR.");
+          return;
+        }
 
-      const orientation = new THREE.Quaternion(q.x, q.y, q.z, q.w);
-      placeObject({ x: p.x, y: p.y, z: p.z }, orientation);
-    });
+        placeObject();
+      });
 
-    // Prevent the browser from treating AR-view taps as ordinary page clicks.
-    scene.addEventListener("touchend", () => {}, { passive: true });
-
-    window.addEventListener("unhandledrejection", event => {
-      setStatus("Error: " + (event.reason?.message || String(event.reason)));
-    });
+      window.addEventListener("unhandledrejection", event => {
+        setStatus(
+          "Error: " +
+          (event.reason?.message || String(event.reason))
+        );
+      });
+    })();
   </script>
 </body>
 </html>
